@@ -5,7 +5,7 @@ header compression, one request per stream. This document is the complete
 wire contract — two implementations that have never seen each other's code
 should interoperate using only this file. Where we follow HTTP/2 (RFC 9113)
 and HPACK (RFC 7541) exactly, we say so; where we cut something, the spec
-says what happens instead. DESIGN.md defends each cut.
+says what happens instead.
 
 Everything on the wire is big-endian. No field depends on the sender's
 host architecture.
