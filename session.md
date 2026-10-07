@@ -54,9 +54,16 @@ Byte by byte:
 
 ## the response, frame 2 — DATA, 174 bytes
 
-    00000000  00 00 a5 00 01 00 00 00 01 3c 21 64 6f 63 74 79  .........<!doctyp
-    00000010  65 20 68 74 6d 6c 3e 0a 3c 68 74 6d 6c 3e 0a 3c  e html>.<html>.<
-    ...  (the raw index.html, 165 bytes) ...
+    00000000  00 00 a5 00 01 00 00 00 01 3c 21 64 6f 63 74 79  .........<!docty
+    00000010  70 65 20 68 74 6d 6c 3e 0a 3c 68 74 6d 6c 3e 0a  pe html>.<html>.
+    00000020  3c 68 65 61 64 3e 3c 74 69 74 6c 65 3e 69 74 20  <head><title>it
+    00000030  77 6f 72 6b 73 3c 2f 74 69 74 6c 65 3e 3c 2f 68  works</title></h
+    00000040  65 61 64 3e 0a 3c 62 6f 64 79 3e 0a 3c 68 31 3e  ead>.<body>.<h1>
+    00000050  69 74 20 77 6f 72 6b 73 3c 2f 68 31 3e 0a 3c 70  it works</h1>.<p
+    00000060  3e 74 68 69 73 20 70 61 67 65 20 63 61 6d 65 20  >this page came
+    00000070  6f 75 74 20 6f 66 20 61 20 44 41 54 41 20 66 72  out of a DATA fr
+    00000080  61 6d 65 2c 20 6e 6f 74 20 61 20 74 65 78 74 20  ame, not a text
+    00000090  70 72 6f 74 6f 63 6f 6c 2e 3c 2f 70 3e 0a 3c 2f  protocol.</p>.</
     000000a0  62 6f 64 79 3e 0a 3c 2f 68 74 6d 6c 3e 0a        body>.</html>.
 
 - `00 00 a5` — Length = 165, exactly the content-length promised in the

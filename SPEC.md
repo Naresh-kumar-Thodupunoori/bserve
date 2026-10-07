@@ -25,20 +25,20 @@ same layout as RFC 9113 section 4.1:
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    +                                                               +
-    |                       Length (24)                             |
-    +-+-------------+---------------+-------------------------------+
-    |R| Type (8)    | Flags (8)     |
-    +-+-------------+---------------+-------------------------------+
-    |R|                        StreamId (31)                        |
-    +                                                               +
+    +---------------------------------------------------------------+
+    |                         Length (24)                           |
+    +---------------------------------------+-----------------------+
+    |               Type (8)                |       Flags (8)       |
+    +-------+-------------------------------------------------------+
+    | R (1) |                     StreamId (31)                     |
+    +-------+-------------------------------------------------------+
 
 | Field     | Width | Meaning |
 |-----------|-------|---------|
 | Length    | 24    | payload length, not counting the 9 header bytes |
 | Type      | 8     | see 2.1 |
 | Flags     | 8     | see 2.2 |
-| R         | 1     | reserved; send 0, ignore on receipt (both fields) |
+| R         | 1     | reserved bit before StreamId; send 0, ignore on receipt |
 | StreamId  | 31    | identifies the request; see 2.3 |
 
 ### 2.1 Frame types
@@ -68,8 +68,12 @@ Rules, following HTTP/2:
 - A HEADERS frame MUST set END_HEADERS. (Full HTTP/2 allows it to be
   clear, followed by CONTINUATION frames; BHTTP/2 has no CONTINUATION,
   so END_HEADERS is always set. A HEADERS without it is malformed.)
-- PADDED (0x08) and PRIORITY (0x20) MUST NOT be set. We do not parse
-  padded or prioritized frames; either bit set is malformed.
+- PADDED (0x08) MUST NOT be set on a HEADERS or a DATA frame, and
+  PRIORITY (0x20) not on a HEADERS frame. We do not parse padded or
+  prioritized frames; the bit set is malformed.
+- Flags belong to the frame type that defines them. An unknown frame
+  type is skipped whole, flags and all — its flag bits never carry
+  meaning over to the request.
 - Any other flag bit is reserved: ignore it, never reject for it.
 
 ### 2.3 Limits and streams
@@ -80,8 +84,9 @@ Rules, following HTTP/2:
   malformed: 400, close. Bigger bodies travel as several frames.
 - The client uses odd stream ids, starting at 1, each strictly greater
   than the last (HTTP/2 section 5.1.1). Stream 0 and even ids from a
-  client are malformed: 400, close. The server sends the response on the
-  request's stream id, unchanged.
+  client are malformed: 400, close. Every DATA frame of a request
+  carries that request's stream id too — any other id is malformed.
+  The server sends the response on the request's stream id, unchanged.
 
 ## 3. Messages
 
@@ -90,8 +95,11 @@ Rules, following HTTP/2:
 One HEADERS frame on a fresh odd stream, carrying at least `:method` and
 `:path`. GET has no body, so the frame carries END_STREAM too. A request
 *with* a body is HEADERS (no END_STREAM) followed by DATA frames, the
-last with END_STREAM — the server reads and discards it. The request ends
-at END_STREAM, whatever the type carrying it.
+last with END_STREAM — the server reads and discards it. The request
+ends at END_STREAM on a HEADERS or DATA frame; END_STREAM on an unknown
+frame type means nothing. A connection that closes cleanly before
+END_STREAM is a malformed request: the server answers 400 on that
+stream, then closes.
 
 ### 3.2 Response
 
@@ -124,7 +132,7 @@ Details:
 - Dropped on purpose: literal *with* incremental indexing (`0x40`–`0x7F`)
   and dynamic table size updates (`0x20`–`0x3F`) mutate decoder state we
   do not keep, and Huffman needs a 256-entry code table. Seeing either
-  opcode range is malformed. DESIGN.md explains the trade.
+  opcode range is malformed.
 
 Pseudo-headers (`:method`, `:path`, `:authority`) follow HTTP/2's rules:
 they must appear before every regular header, must not repeat, and any
@@ -175,7 +183,7 @@ Static table (RFC 7541 appendix A, all 61 entries; — means no value):
     82                            :method "GET"       (table entry 2 — one byte)
     85                            :path "/index.html" (table entry 5 — one byte)
     00 0a :authority 09 localhost literal
-    00 0a user-agent 09 bcurl/0.1 literal
+    00 0a user-agent 09 bcurl/0.2 literal
 
 The 200 reply for an empty file is a single HEADERS frame; `:status`,
 `content-type` and `content-length` header entries, both END flags set.
@@ -186,7 +194,7 @@ A file with a body adds DATA frames, the last with END_STREAM.
 | Code | When | Connection after |
 |------|------|------------------|
 | 200  | file found and sent | stays open |
-| 400  | anything malformed: bad frame layout, declared length over 16384, DATA first, HEADERS without END_HEADERS, PADDED/PRIORITY set, stream id 0/even/reused, broken header block, bad opcode, missing/late/duplicate pseudo-headers, missing :method/:path | closed |
+| 400  | anything malformed: bad frame layout, declared length over 16384, DATA first, HEADERS without END_HEADERS, PADDED/PRIORITY set, stream id 0/even/reused or DATA on the wrong stream, broken header block, bad opcode, missing/late/duplicate pseudo-headers, missing :method/:path | closed |
 | 404  | no such file under the root | stays open |
 | 405  | method is not GET | stays open |
 
@@ -199,9 +207,9 @@ declared), the server just closes. There is nobody left to tell.
   `./bserve ./www 9000` + `:path /index.html` reads `./www/index.html`.
 - `/` means `/index.html` (hence its table entry).
 - No percent-decoding. The path is used literally.
-- A path that tries to escape the root (`..` anywhere, or anything that
-  resolves outside it) gets 404 — same answer as a missing file, on
-  purpose.
+- A path that tries to escape the root (`..` as a path segment, or
+  anything that resolves outside the root — symlinks count) gets 404 —
+  same answer as a missing file, on purpose.
 
 ## 8. Things an implementer can assume
 

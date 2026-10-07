@@ -59,6 +59,10 @@ class FrameError(Exception):
     pass
 
 
+class ConnectionDied(Exception):
+    """Peer hung up mid-header or mid-payload. No answer is possible."""
+
+
 def pack_frame(ftype, flags, stream_id, payload):
     if len(payload) > MAX_PAYLOAD:
         raise ValueError("payload too big for one frame")
@@ -98,11 +102,11 @@ def read_frame(sock):
     if not head:
         return None
     if len(head) < HEADER_SIZE:
-        raise FrameError("connection died mid header")
+        raise ConnectionDied("connection died mid header")
     length, ftype, flags, stream_id = parse_frame_header(head)
     payload = read_exact(sock, length)
     if len(payload) < length:
-        raise FrameError("connection died mid payload")
+        raise ConnectionDied("connection died mid payload")
     return ftype, flags, stream_id, payload
 
 

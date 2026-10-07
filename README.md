@@ -33,9 +33,12 @@ tests/bcurl.py is that mini client.
 ## tests
 
     python3 tests/test_frame.py
+    python3 tests/test_server.py
 
-19 of them. Round trips plus every malformed input I could think of:
-truncated header blocks, bad opcodes, absurd length fields.
+test_frame is the codec: 19 unit tests, round trips plus every malformed
+input I could think of. test_server starts the real server and drives it
+over sockets: keep-alive, stream id rules, unknown frame skipping,
+traversal, mid-frame disconnects.
 
 ## problems I ran into
 

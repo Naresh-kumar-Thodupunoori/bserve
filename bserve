@@ -4,7 +4,7 @@ import os
 import socket
 import sys
 import threading
-import time
+from email.utils import formatdate
 
 import bframe
 
@@ -37,7 +37,7 @@ class RequestError(Exception):
 
 
 def http_date():
-    return time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())
+    return formatdate(usegmt=True)  # locale-independent, unlike strftime
 
 
 def send_response(conn, stream_id, headers, body=b""):
@@ -99,12 +99,14 @@ def handle_request(conn, headers, stream_id, docroot):
     if path == "/":
         path = "/index.html"
 
-    # no traversal: reject ".." outright and keep normpath inside the root
+    # no traversal: reject ".." outright, and realpath so symlinks can't
+    # sneak the path back out of the root either
     if ".." in path.split("/"):
         send_status(conn, stream_id, 404)
         return True
-    full = os.path.normpath(os.path.join(docroot, path.lstrip("/")))
-    if not full.startswith(docroot + os.sep) or not os.path.isfile(full):
+    root = os.path.realpath(docroot)
+    full = os.path.realpath(os.path.join(root, path.lstrip("/")))
+    if not full.startswith(root + os.sep) or not os.path.isfile(full):
         send_status(conn, stream_id, 404)
         return True
 
@@ -124,16 +126,17 @@ def handle_request(conn, headers, stream_id, docroot):
 
 def read_request(sock):
     """Frames until END_STREAM. Returns (headers, stream_id), or None when
-    the peer closed cleanly between requests. Any body DATA frames are
-    read and dropped, so the connection stays in sync even for methods
-    we end up rejecting."""
+    the peer closed cleanly between requests. Body DATA frames are read
+    and dropped, so the connection stays in sync even for methods we end
+    up rejecting."""
     headers = None
+    stream_id = 0
     while True:
         frame = bframe.read_frame(sock)
         if frame is None:
             if headers is None:
                 return None
-            raise RequestError("connection died mid request")
+            raise RequestError("connection died mid request", stream_id)
         ftype, flags, sid, payload = frame
         if headers is None:
             if ftype == bframe.TYPE_DATA:
@@ -146,16 +149,24 @@ def read_request(sock):
                 if flags & 0x08 or flags & 0x20:
                     raise RequestError("padding/priority are not supported",
                                        sid)
-                headers = bframe.decode_headers(payload)  # FrameError -> 400
+                try:
+                    headers = bframe.decode_headers(payload)
+                except bframe.FrameError as e:
+                    raise RequestError(str(e), sid)
                 stream_id = sid
             # anything else is a control/unknown frame before the request:
-            # skip it, exactly like HTTP/2 says to
+            # skip it whole, flags included, like http/2 says
         elif ftype == bframe.TYPE_HEADERS:
             raise RequestError("second HEADERS in one request", stream_id)
-        # DATA payloads and unknown frame types: read and drop
-        if flags & bframe.FLAG_END_STREAM:
-            if headers is None:
-                raise RequestError("request ended without HEADERS")
+        elif ftype == bframe.TYPE_DATA:
+            if sid != stream_id:
+                raise RequestError("DATA frame on the wrong stream",
+                                   stream_id)
+            if flags & 0x08:
+                raise RequestError("padded DATA is not supported", stream_id)
+        # unknown frame types: read and drop
+        if ftype in (bframe.TYPE_HEADERS, bframe.TYPE_DATA) \
+                and flags & bframe.FLAG_END_STREAM:
             return headers, stream_id
 
 
@@ -172,6 +183,8 @@ def serve_conn(conn, docroot):
             last_sid = sid
             if not handle_request(conn, headers, sid, docroot):
                 return
+    except bframe.ConnectionDied:
+        pass  # died mid-frame: close silently, spec section 6
     except RequestError as e:
         try:
             send_status(conn, e.stream_id, 400)
